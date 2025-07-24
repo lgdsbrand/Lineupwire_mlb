@@ -1,13 +1,7 @@
 {
   "redirects": [
     {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
-          "value": "www.lineupwire.com"
-        }
-      ],
+      "source": "www.lineupwire.com",
       "destination": "https://lineupwire.com",
       "permanent": true
     }
