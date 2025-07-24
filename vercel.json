@@ -1,9 +1,3 @@
 {
-  "redirects": [
-    {
-      "source": "www.lineupwire.com",
-      "destination": "https://lineupwire.com",
-      "permanent": true
-    }
-  ]
+  "cleanUrls": true
 }
