@@ -1,6 +1,15 @@
 {
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/", "destination": "/index.html" }
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.lineupwire.com"
+        }
+      ],
+      "destination": "https://lineupwire.com",
+      "permanent": true
+    }
   ]
 }
