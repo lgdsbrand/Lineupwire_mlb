@@ -1,70 +1,104 @@
 import streamlit as st
 import pandas as pd
-import requests
 from datetime import datetime
 
-st.set_page_config(layout="wide")
-
-# ---------------------------
-# HEADER
-# ---------------------------
-st.markdown(
-    """
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="MLB Daily Model", layout="wide")
+st.markdown("""
     <style>
-        .back-btn {
-            background-color: black;
-            color: white;
-            padding: 8px 20px;
-            border-radius: 12px;
-            text-decoration: none;
-            font-weight: bold;
-        }
-        .back-btn:hover {
-            background-color: #333;
-        }
+    #MainMenu, footer, header {visibility: hidden;}
     </style>
-    <a class="back-btn" href="https://lineupwire.com">⬅ Back to Homepage</a>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
-st.markdown("<h1>⚾ MLB Daily Model</h1>", unsafe_allow_html=True)
+# --- BACK TO HOMEPAGE BUTTON ---
+st.markdown("""
+<div style="text-align: left; margin-bottom: 10px;">
+    <a href="https://lineupwire.com" target="_self" 
+       style="background-color: black; color: white; padding: 6px 16px; 
+              border-radius: 12px; text-decoration: none;">
+        ⬅ Back to Homepage
+    </a>
+</div>
+""", unsafe_allow_html=True)
 
-# ---------------------------
-# ESPN API - MLB Games Today
-# ---------------------------
-today = datetime.now().strftime("%Y%m%d")
-url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={today}"
-data = requests.get(url).json()
+# --- TITLE ---
+st.markdown("<h1 style='display: inline;'>⚾ MLB Daily Model</h1>", unsafe_allow_html=True)
 
-games = []
-for event in data.get("events", []):
-    game_time = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).strftime("%I:%M %p ET")
-    away_team = event["competitions"][0]["competitors"][1]["team"]["displayName"]
-    home_team = event["competitions"][0]["competitors"][0]["team"]["displayName"]
-    
-    # Dummy example model calculation
-    # Replace with your weighted formula
-    away_score = round(2.5 + len(away_team) % 4, 1)
-    home_score = round(2.5 + len(home_team) % 4, 1)
-    model_ou = round(away_score + home_score, 1)
-    
-    # Placeholder FanDuel scrape (replace with real odds if desired)
-    book_ou = model_ou - 0.5
-    
-    # Model ML Bet
-    home_win_prob = round((home_score / (home_score + away_score)) * 100)
-    ml_bet = home_team if home_win_prob >= 50 else away_team
-    ml_display = f"{ml_bet} ({home_win_prob}%)"
+# --- TOGGLE BUTTONS ---
+toggle = st.radio("Select View", ["Card View", "Table View", "Records"], horizontal=True)
 
-    games.append([
-        game_time, away_team, away_score, home_team, home_score,
-        ml_display, book_ou, model_ou
-    ])
+# --- LOAD DAILY MODEL ---
+@st.cache_data(ttl=60*60)
+def load_daily_model():
+    return pd.read_csv("daily_model.csv")
 
-columns = ["Game Time", "Away Team", "Away Score Proj", "Home Team",
-           "Home Score Proj", "ML Bet", "Book O/U", "Model O/U"]
+try:
+    df = load_daily_model()
+except FileNotFoundError:
+    st.error("Daily model data not found. Wait for next refresh.")
+    st.stop()
 
-df = pd.DataFrame(games, columns=columns)
+# --- CLEAN DATA ---
+if df.columns[0].lower() in ['unnamed: 0', 'index']:
+    df = df.drop(df.columns[0], axis=1)
 
-st.dataframe(df, hide_index=True, use_container_width=True)
+score_cols = ['Away Score Proj', 'Home Score Proj', 'Book O/U', 'Model O/U']
+for col in score_cols:
+    if col in df.columns:
+        df[col] = df[col].map(lambda x: f"{x:.1f}" if pd.notnull(x) else "")
+
+# --- SORT BY GAME TIME ---
+if 'Game Time' in df.columns:
+    try:
+        df['sort_time'] = pd.to_datetime(df['Game Time'], errors='coerce')
+        df = df.sort_values('sort_time').drop(columns=['sort_time'])
+    except:
+        pass
+
+# --- AUTO RECORD TRACKING ---
+record_file = "daily_records.csv"
+today = datetime.now().date()
+if "ML Bet" in df.columns:
+    wins = sum(df["ML Bet"].str.contains("W", na=False))
+    losses = sum(~df["ML Bet"].str.contains("W", na=False))
+    today_record = pd.DataFrame([[today, "Daily Model", wins, losses,
+                                  f"{(wins/(wins+losses))*100:.0f}%"]],
+                                  columns=["Date","Model","Wins","Losses","Win%"])
+    try:
+        old_records = pd.read_csv(record_file)
+    except:
+        old_records = pd.DataFrame(columns=today_record.columns)
+    if str(today) not in old_records["Date"].astype(str).values:
+        pd.concat([old_records, today_record], ignore_index=True).to_csv(record_file, index=False)
+
+# --- TOGGLE VIEWS ---
+if toggle == "Table View":
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+elif toggle == "Card View":
+    for _, row in df.iterrows():
+        st.markdown(f"""
+        <div style="border:1px solid #ccc; border-radius:12px; padding:10px; margin-bottom:10px;">
+            <strong>{row['Game Time']}</strong>  
+            <h4>{row['Away Team']} ({row['Away Score Proj']}) @ 
+            {row['Home Team']} ({row['Home Score Proj']})</h4>
+            <p><b>ML Bet:</b> {row['ML Bet']}</p>
+            <p><b>Book O/U:</b> {row['Book O/U']} | <b>Model O/U:</b> {row['Model O/U']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+elif toggle == "Records":
+    try:
+        rec = pd.read_csv(record_file)
+        # Weekly / Monthly summaries
+        rec['Date'] = pd.to_datetime(rec['Date'])
+        rec['Week'] = rec['Date'].dt.isocalendar().week
+        rec['Month'] = rec['Date'].dt.month
+        st.subheader("Daily Records")
+        st.dataframe(rec.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
+        st.subheader("Weekly Summary")
+        st.dataframe(rec.groupby("Week")[["Wins","Losses"]].sum(), use_container_width=True)
+        st.subheader("Monthly Summary")
+        st.dataframe(rec.groupby("Month")[["Wins","Losses"]].sum(), use_container_width=True)
+    except FileNotFoundError:
+        st.info("No record file yet.")
