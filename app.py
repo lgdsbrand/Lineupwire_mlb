@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import datetime
+import pytz
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="MLB Daily Model", layout="wide")
@@ -21,84 +23,52 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# --- TITLE ---
 st.markdown("<h1 style='display: inline;'>⚾ MLB Daily Model</h1>", unsafe_allow_html=True)
 
-# --- TOGGLE BUTTONS ---
-toggle = st.radio("Select View", ["Card View", "Table View", "Records"], horizontal=True)
+# --- LOAD LIVE MLB SCHEDULE (ESPN) ---
+@st.cache_data(ttl=3600)
+def fetch_mlb_schedule():
+    today = datetime.now().strftime("%Y%m%d")
+    url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={today}"
+    r = requests.get(url)
+    data = r.json()
+    
+    games = []
+    est = pytz.timezone('US/Eastern')
+    for event in data.get("events", []):
+        game_time_utc = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
+        game_time_est = game_time_utc.astimezone(est).strftime("%I:%M %p")
 
-# --- LOAD DAILY MODEL ---
-@st.cache_data(ttl=60*60)
-def load_daily_model():
-    return pd.read_csv("daily_model.csv")
+        competitions = event.get("competitions", [])[0]
+        teams = competitions["competitors"]
+        home_team = next(t["team"]["displayName"] for t in teams if t["homeAway"] == "home")
+        away_team = next(t["team"]["displayName"] for t in teams if t["homeAway"] == "away")
+        
+        # --- MODEL SIMULATION PLACEHOLDER (replace with weighted formula logic) ---
+        # Example projected scores (use your weighted stats logic)
+        away_score = round(3 + len(away_team)%3 + 0.2, 1)
+        home_score = round(4 + len(home_team)%3 + 0.3, 1)
+        ml_winner = home_team if home_score > away_score else away_team
+        ml_win_pct = 65 if home_score != away_score else 55
+        book_ou = 8.5
+        model_ou = round(away_score + home_score, 1)
 
-try:
-    df = load_daily_model()
-except FileNotFoundError:
-    st.error("Daily model data not found. Wait for next refresh.")
-    st.stop()
+        games.append([
+            game_time_est,
+            away_team, away_score,
+            home_team, home_score,
+            f"{ml_winner} ({ml_win_pct}%)",
+            book_ou, model_ou
+        ])
 
-# --- CLEAN DATA ---
-if df.columns[0].lower() in ['unnamed: 0', 'index']:
-    df = df.drop(df.columns[0], axis=1)
+    df = pd.DataFrame(games, columns=[
+        "Game Time", "Away Team", "Away Score Proj",
+        "Home Team", "Home Score Proj", "ML Bet",
+        "Book O/U", "Model O/U"
+    ])
+    return df
 
-score_cols = ['Away Score Proj', 'Home Score Proj', 'Book O/U', 'Model O/U']
-for col in score_cols:
-    if col in df.columns:
-        df[col] = df[col].map(lambda x: f"{x:.1f}" if pd.notnull(x) else "")
+df = fetch_mlb_schedule()
 
-# --- SORT BY GAME TIME ---
-if 'Game Time' in df.columns:
-    try:
-        df['sort_time'] = pd.to_datetime(df['Game Time'], errors='coerce')
-        df = df.sort_values('sort_time').drop(columns=['sort_time'])
-    except:
-        pass
-
-# --- AUTO RECORD TRACKING ---
-record_file = "daily_records.csv"
-today = datetime.now().date()
-if "ML Bet" in df.columns:
-    wins = sum(df["ML Bet"].str.contains("W", na=False))
-    losses = sum(~df["ML Bet"].str.contains("W", na=False))
-    today_record = pd.DataFrame([[today, "Daily Model", wins, losses,
-                                  f"{(wins/(wins+losses))*100:.0f}%"]],
-                                  columns=["Date","Model","Wins","Losses","Win%"])
-    try:
-        old_records = pd.read_csv(record_file)
-    except:
-        old_records = pd.DataFrame(columns=today_record.columns)
-    if str(today) not in old_records["Date"].astype(str).values:
-        pd.concat([old_records, today_record], ignore_index=True).to_csv(record_file, index=False)
-
-# --- TOGGLE VIEWS ---
-if toggle == "Table View":
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-elif toggle == "Card View":
-    for _, row in df.iterrows():
-        st.markdown(f"""
-        <div style="border:1px solid #ccc; border-radius:12px; padding:10px; margin-bottom:10px;">
-            <strong>{row['Game Time']}</strong>  
-            <h4>{row['Away Team']} ({row['Away Score Proj']}) @ 
-            {row['Home Team']} ({row['Home Score Proj']})</h4>
-            <p><b>ML Bet:</b> {row['ML Bet']}</p>
-            <p><b>Book O/U:</b> {row['Book O/U']} | <b>Model O/U:</b> {row['Model O/U']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-elif toggle == "Records":
-    try:
-        rec = pd.read_csv(record_file)
-        # Weekly / Monthly summaries
-        rec['Date'] = pd.to_datetime(rec['Date'])
-        rec['Week'] = rec['Date'].dt.isocalendar().week
-        rec['Month'] = rec['Date'].dt.month
-        st.subheader("Daily Records")
-        st.dataframe(rec.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
-        st.subheader("Weekly Summary")
-        st.dataframe(rec.groupby("Week")[["Wins","Losses"]].sum(), use_container_width=True)
-        st.subheader("Monthly Summary")
-        st.dataframe(rec.groupby("Month")[["Wins","Losses"]].sum(), use_container_width=True)
-    except FileNotFoundError:
-        st.info("No record file yet.")
+# --- DISPLAY TABLE ---
+st.dataframe(df, use_container_width=True, hide_index=True)
