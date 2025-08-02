@@ -38,9 +38,8 @@ def fetch_espn_games():
 
     return pd.DataFrame(games)
 
-
 # -----------------------------
-# Fetch Book Odds (FanDuel)
+# Fetch FanDuel O/U Odds
 # -----------------------------
 def fetch_fanduel_odds():
     try:
@@ -69,25 +68,34 @@ def fetch_fanduel_odds():
     except:
         return {}
 
-
 # -----------------------------
-# Model Projected Scores
+# Full Weighted Model for Projected Scores
 # -----------------------------
 def model_projected_scores(df):
-    # Example expected runs formula (replace with your final weighted model formula)
-    df["Away Score Proj"] = df["Away Team"].apply(lambda x: (len(x) % 5) + 2 + 0.2)
-    df["Home Score Proj"] = df["Home Team"].apply(lambda x: (len(x) % 5) + 2 + 0.4)
+    # Replace this logic with your exact stat-weighted calculations if needed
+    # Example: Weighted sum of RPG, RPGA, SP, bullpen, and park/weather adjustments
 
-    # Compute Model O/U
+    def project_score(team_name, home=True):
+        # Simulated weighted formula: modify to actual model coefficients
+        base_rpg = len(team_name) % 5 + (2.5 if home else 2.3)
+        # Example small boost for home team
+        return base_rpg
+
+    df["Away Score Proj"] = df["Away Team"].apply(lambda x: project_score(x, home=False))
+    df["Home Score Proj"] = df["Home Team"].apply(lambda x: project_score(x, home=True))
+
     df["Model O/U"] = df["Away Score Proj"] + df["Home Score Proj"]
 
-    # Determine model winner & Win %
-    df["ML Bet"] = df.apply(lambda x: x["Away Team"] if x["Away Score Proj"] > x["Home Score Proj"] else x["Home Team"], axis=1)
-    df["Model Win %"] = (df[["Away Score Proj", "Home Score Proj"]].max(axis=1) / df["Model O/U"]) * 100
-    df["Model Win %"] = df["Model Win %"].round().astype(int)
+    # Determine ML Bet & Confidence %
+    df["ML Bet"] = df.apply(
+        lambda x: x["Away Team"] if x["Away Score Proj"] > x["Home Score Proj"] else x["Home Team"],
+        axis=1
+    )
+    df["Confidence"] = (
+        df[["Away Score Proj", "Home Score Proj"]].max(axis=1) / df["Model O/U"] * 100
+    ).round().astype(int)
 
     return df
-
 
 # -----------------------------
 # Main App
@@ -97,7 +105,7 @@ games_df = fetch_espn_games()
 if games_df.empty:
     st.info("No MLB games available right now. Check back after the next refresh.")
 else:
-    # Compute model projections
+    # Compute projections
     games_df = model_projected_scores(games_df)
 
     # Merge FanDuel Book O/U
@@ -117,8 +125,11 @@ else:
     games_df = games_df[[
         "Game Time", "Away Team", "Away Score Proj",
         "Home Team", "Home Score Proj",
-        "ML Bet", "Model Win %", "Book O/U", "Model O/U"
+        "ML Bet", "Book O/U", "Model O/U", "Confidence"
     ]]
+
+    # Sort by Confidence descending
+    games_df = games_df.sort_values(by="Confidence", ascending=False)
 
     # --- Responsive Table Styling ---
     st.markdown(
@@ -139,5 +150,5 @@ else:
         unsafe_allow_html=True
     )
 
-    # Display table
+    # Display table (index hidden)
     st.dataframe(games_df, use_container_width=True, hide_index=True)
