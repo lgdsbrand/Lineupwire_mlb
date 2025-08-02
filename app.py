@@ -1,88 +1,70 @@
 import streamlit as st
 import pandas as pd
-import datetime as dt
+import requests
+from datetime import datetime
 
-# ===== PAGE CONFIG =====
-st.set_page_config(page_title="MLB Daily Model", layout="wide")
+st.set_page_config(layout="wide")
 
-# Hide Streamlit menu and footer
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
-# Back to Homepage button
+# ---------------------------
+# HEADER
+# ---------------------------
 st.markdown(
     """
-    <a href="https://lineupwire.com" target="_self">
-        <button style="
+    <style>
+        .back-btn {
             background-color: black;
             color: white;
-            padding: 8px 16px;
-            border-radius: 8px;
-            border: none;
-            font-size: 16px;
-            cursor: pointer;
-        ">Back to Homepage</button>
-    </a>
+            padding: 8px 20px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .back-btn:hover {
+            background-color: #333;
+        }
+    </style>
+    <a class="back-btn" href="https://lineupwire.com">⬅ Back to Homepage</a>
     """,
     unsafe_allow_html=True
 )
 
-st.title("⚾ MLB Daily Model")
+st.markdown("<h1>⚾ MLB Daily Model</h1>", unsafe_allow_html=True)
 
-# ===== LOAD DATA (replace with your Google Sheet or data source) =====
-# Example using CSV or Google Sheet (update with your link)
-try:
-    # Example: Replace with your real data source
-    df = pd.read_csv("daily_model.csv")
+# ---------------------------
+# ESPN API - MLB Games Today
+# ---------------------------
+today = datetime.now().strftime("%Y%m%d")
+url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={today}"
+data = requests.get(url).json()
 
-    # Ensure proper formatting
-    df["Game Time"] = pd.to_datetime(df["Game Time"])
-    df = df.sort_values("Game Time")
+games = []
+for event in data.get("events", []):
+    game_time = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).strftime("%I:%M %p ET")
+    away_team = event["competitions"][0]["competitors"][1]["team"]["displayName"]
+    home_team = event["competitions"][0]["competitors"][0]["team"]["displayName"]
+    
+    # Dummy example model calculation
+    # Replace with your weighted formula
+    away_score = round(2.5 + len(away_team) % 4, 1)
+    home_score = round(2.5 + len(home_team) % 4, 1)
+    model_ou = round(away_score + home_score, 1)
+    
+    # Placeholder FanDuel scrape (replace with real odds if desired)
+    book_ou = model_ou - 0.5
+    
+    # Model ML Bet
+    home_win_prob = round((home_score / (home_score + away_score)) * 100)
+    ml_bet = home_team if home_win_prob >= 50 else away_team
+    ml_display = f"{ml_bet} ({home_win_prob}%)"
 
-    # Format scores to single decimal
-    df["Away Score"] = df["Away Score"].map(lambda x: f"{x:.1f}")
-    df["Home Score"] = df["Home Score"].map(lambda x: f"{x:.1f}")
+    games.append([
+        game_time, away_team, away_score, home_team, home_score,
+        ml_display, book_ou, model_ou
+    ])
 
-    # Drop index column for clean look
-    df.reset_index(drop=True, inplace=True)
+columns = ["Game Time", "Away Team", "Away Score Proj", "Home Team",
+           "Home Score Proj", "ML Bet", "Book O/U", "Model O/U"]
 
-    # Create a styled HTML table
-    styled_table = df.to_html(
-        index=False,
-        classes="styled-table",
-        escape=False
-    )
+df = pd.DataFrame(games, columns=columns)
 
-    # Add table styling with rounded red/blue border
-    st.markdown(
-        """
-        <style>
-        .styled-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            font-size: 16px;
-            text-align: center;
-            border: 2px solid blue;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .styled-table th, .styled-table td {
-            border: 1px solid red;
-            padding: 8px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(styled_table, unsafe_allow_html=True)
-
-except Exception as e:
-    st.error(f"Error loading Daily Model: {e}")
+st.dataframe(df, hide_index=True, use_container_width=True)
