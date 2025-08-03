@@ -1,128 +1,101 @@
-import pandas as pd
 import requests
+import pandas as pd
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-# -------------------------
-# 1. Fetch MLB Schedule
-# -------------------------
-def fetch_mlb_schedule():
+CSV_FILENAME = "daily_model.csv"
+
+# -------------------------------
+# 1. Get Today's Games from ESPN
+# -------------------------------
+def get_espn_games():
     today = datetime.now().strftime("%Y%m%d")
     url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={today}"
-    data = requests.get(url).json()
+    resp = requests.get(url).json()
 
     games = []
-    for event in data.get("events", []):
-        game_time = datetime.fromisoformat(event["date"][:-1]).strftime("%I:%M %p ET")
-        away_team = event["competitions"][0]["competitors"][1]["team"]["displayName"]
-        home_team = event["competitions"][0]["competitors"][0]["team"]["displayName"]
+    for event in resp.get("events", []):
+        comp = event["competitions"][0]
+        teams = comp["competitors"]
+        home = next(t for t in teams if t["homeAway"] == "home")["team"]["displayName"]
+        away = next(t for t in teams if t["homeAway"] == "away")["team"]["displayName"]
 
-        away_pitcher = "TBD"
-        home_pitcher = "TBD"
+        # Game time in 12-hour ET
+        game_time = datetime.strptime(event["date"], "%Y-%m-%dT%H:%MZ").strftime("%I:%M %p")
 
-        for comp in event["competitions"][0]["competitors"]:
-            if "startingPitcher" in comp:
-                pitcher_name = comp["startingPitcher"]["athlete"]["displayName"]
-                if comp["homeAway"] == "home":
-                    home_pitcher = pitcher_name
-                else:
-                    away_pitcher = pitcher_name
-
-        games.append([game_time, away_team, home_team, away_pitcher, home_pitcher])
-
-    return pd.DataFrame(games, columns=["Game Time", "Away Team", "Home Team", "Away Pitcher", "Home Pitcher"])
+        games.append({
+            "game_time": game_time,
+            "home_team": home,
+            "away_team": away
+        })
+    return pd.DataFrame(games)
 
 
-# -------------------------
-# 2. Fetch Team NRFI Stats
-# -------------------------
-def fetch_team_nrfi_stats():
-    url = "https://www.teamrankings.com/mlb/stat/1st-inning-runs-per-game"
-    page = requests.get(url).text
-    soup = BeautifulSoup(page, "html.parser")
+# -------------------------------
+# 2. Get FanDuel Book O/U Lines
+# -------------------------------
+def get_fanduel_odds():
+    url = "https://sportsbook.fanduel.com/navigation/mlb"
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-    table = soup.find("table", {"class": "tr-table"})
-    rows = table.find_all("tr")[1:]
+    # Example scraping logic — this may need tweaking if Fanduel changes layout
+    lines = {}
+    for game_block in soup.find_all("div", class_="event"):
+        teams = [t.get_text(strip=True) for t in game_block.select(".name")]
+        ou_tag = game_block.find("span", class_="total")  # placeholder class
+        if len(teams) == 2 and ou_tag:
+            lines[f"{teams[0]} vs {teams[1]}"] = ou_tag.get_text(strip=True)
 
-    stats = {}
-    for row in rows:
-        cols = [c.text.strip() for c in row.find_all("td")]
-        if len(cols) >= 2:
-            team = cols[0]
-            first_inning_runs = float(cols[1])
-            stats[team] = first_inning_runs
-    return stats
+    return lines
 
 
-# -------------------------
-# 3. NRFI Model Generator
-# -------------------------
-def generate_nrfi_model(schedule, team_stats):
-    results = []
-    for _, row in schedule.iterrows():
-        away_team = row["Away Team"]
-        home_team = row["Home Team"]
+# -------------------------------
+# 3. Daily Model Formula
+# -------------------------------
+def calculate_model_scores(row):
+    # Example weighted formula (adjustable)
+    # Replace with your real stats integration
+    away_score = (row.get("away_rpg25", 4.2) + row.get("home_rpga25", 4.1)) / 2
+    home_score = (row.get("home_rpg25", 4.5) + row.get("away_rpga25", 4.0)) / 2
 
-        away_rpg = team_stats.get(away_team, 0.5)
-        home_rpg = team_stats.get(home_team, 0.5)
+    # Example O/U projection
+    model_ou = round(away_score + home_score, 1)
 
-        away_nrfi = max(0.2, 1 - away_rpg / 1.0)
-        home_nrfi = max(0.2, 1 - home_rpg / 1.0)
+    # Determine ML favorite and win %
+    if home_score > away_score:
+        ml_winner = f"{row['home_team']} ({int(60 + (home_score-away_score)*5)}%)"
+    else:
+        ml_winner = f"{row['away_team']} ({int(60 + (away_score-home_score)*5)}%)"
 
-        nrfi_prob = round((away_nrfi * home_nrfi) * 100, 0)
-        pick = "NRFI" if nrfi_prob >= 55 else "YRFI"
-
-        results.append([
-            row["Game Time"], away_team, home_team, row["Away Pitcher"], row["Home Pitcher"], pick, nrfi_prob
-        ])
-
-    df = pd.DataFrame(results, columns=[
-        "Game Time", "Away Team", "Home Team", "Away Pitcher", "Home Pitcher", "Pick", "Confidence"
-    ])
-    df.to_csv("nrfi_model.csv", index=False)
-    print("✅ NRFI model updated!")
+    return pd.Series([round(away_score, 1), round(home_score, 1), ml_winner, model_ou])
 
 
-# -------------------------
-# 4. Daily Model Generator
-# -------------------------
-def generate_daily_model(schedule):
-    results = []
-    for _, row in schedule.iterrows():
-        away_team = row["Away Team"]
-        home_team = row["Home Team"]
+# -------------------------------
+# 4. Main Function
+# -------------------------------
+def main():
+    games_df = get_espn_games()
+    # Merge in future team stats if available for the formula
+    # For now using simple weights and placeholders for stats
 
-        # Example projections - replace with weighted/Monte Carlo logic
-        away_score = 3.5
-        home_score = 4.2
+    games_df[["away_score", "home_score", "ml_winner", "model_ou"]] = games_df.apply(calculate_model_scores, axis=1)
 
-        winner = home_team if home_score > away_score else away_team
-        win_pct = 65  # Placeholder until model logic is integrated
+    # Pull book O/U
+    fanduel_lines = get_fanduel_odds()
+    games_df["book_ou"] = games_df.apply(
+        lambda row: fanduel_lines.get(f"{row['away_team']} vs {row['home_team']}", "N/A"), axis=1
+    )
 
-        model_ou = round(away_score + home_score, 1)
-        book_ou = 8.5  # Placeholder for FanDuel scraping
+    # Reorder columns for final CSV
+    output_df = games_df[[
+        "game_time", "away_team", "away_score", "home_team", "home_score",
+        "ml_winner", "book_ou", "model_ou"
+    ]]
 
-        results.append([
-            row["Game Time"], away_team, home_team,
-            away_score, home_score,
-            f"{winner} ({win_pct}%)", book_ou, model_ou
-        ])
-
-    df = pd.DataFrame(results, columns=[
-        "Game Time", "Away Team", "Home Team",
-        "Away Score Proj", "Home Score Proj",
-        "ML Bet", "Book O/U", "Model O/U"
-    ])
-    df.to_csv("daily_model.csv", index=False)
-    print("✅ Daily MLB model updated!")
+    output_df.to_csv(CSV_FILENAME, index=False)
+    print(f"Daily MLB model updated: {CSV_FILENAME}")
 
 
-# -------------------------
-# 5. Run Both Models
-# -------------------------
 if __name__ == "__main__":
-    schedule = fetch_mlb_schedule()
-    team_stats = fetch_team_nrfi_stats()
-
-    generate_nrfi_model(schedule, team_stats)
-    generate_daily_model(schedule)
+    main()
