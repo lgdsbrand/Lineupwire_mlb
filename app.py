@@ -2,39 +2,56 @@ import streamlit as st
 import pandas as pd
 from update_models import calculate_daily_model
 
-# -----------------------------
-# STREAMLIT CONFIG
-# -----------------------------
+# -------------------------------
+# PAGE CONFIG
+# -------------------------------
 st.set_page_config(
-    page_title="MLB Daily Model",
+    page_title="MLB Daily Betting Model",
     page_icon="⚾",
-    layout="wide"
+    layout="wide",
 )
 
+# Hide Streamlit default menu, footer, and GitHub icon
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display: none;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+# -------------------------------
+# HEADER
+# -------------------------------
 st.title("⚾ MLB Daily Betting Model (Automatic)")
 
-# Load data
-df = calculate_daily_model()
+# -------------------------------
+# LOAD DAILY MODEL
+# -------------------------------
+with st.spinner("Calculating model..."):
+    df = calculate_daily_model()
 
-# Replace None/NaN with blank for cleaner UI
-df = df.fillna("")
-
-# Columns to display (match your model output)
+# -------------------------------
+# DISPLAY MODEL TABLE
+# -------------------------------
 display_cols = [
-    'Team', 'RPG', 'RPGa', 'rOBA',
-    'Bullpen_ERA', 'Bullpen_WHIP',
-    'SP_ERA', 'SP_FIP',
-    'Model_Total', 'O/U Bet'
+    "Team", "RPG", "RPGA", "rOBA",
+    "Bullpen_ERA", "Bullpen_WHIP",
+    "SP_ERA", "SP_FIP",
+    "Model_Total", "O/U Bet"
 ]
 
-# Only show columns that exist
-display_cols = [c for c in display_cols if c in df.columns]
+# Handle if any columns are missing (e.g., during first run)
+df_reset = df.reset_index(drop=True)
+for col in display_cols:
+    if col not in df_reset.columns:
+        df_reset[col] = None
 
 st.dataframe(
-    df[display_cols],
+    df_reset[display_cols],
     use_container_width=True
 )
 
-# Back to homepage button
-if st.button("⬅ Back to Homepage"):
-    st.switch_page("Home.py")
+st.success("✅ Model updated automatically.")
