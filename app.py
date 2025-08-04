@@ -1,30 +1,46 @@
 import streamlit as st
 import pandas as pd
+import os
+from update_models import calculate_daily_model
 
-st.set_page_config(layout="wide")
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(page_title="Daily MLB Betting Model", layout="wide")
 
-st.markdown(
-    """
-    <style>
-    table td, table th {
-        text-align: center !important;
-        font-size: 18px !important;
-    }
-    .stDataFrame {height: auto !important;}
-    </style>
-    """, unsafe_allow_html=True
-)
+st.title("Daily MLB Betting Model")
+st.markdown("[⬅️ Back to Homepage](https://lineupwire.com)")
 
-st.title("MLB Daily Model")
+# -----------------------------
+# LOAD PREDICTIONS WITH FALLBACK
+# -----------------------------
+try:
+    df = calculate_daily_model()
+except Exception as e:
+    st.warning(f"⚠️ Live model failed: {e}. Loading last saved CSV.")
+    if os.path.exists("daily_model.csv"):
+        df = pd.read_csv("daily_model.csv")
+    else:
+        st.error("❌ No live data or saved CSV available.")
+        st.stop()
 
-# Back to Homepage Button
-st.markdown(
-    '<a href="https://lineupwire.com" style="display:inline-block; padding:10px 20px; background:black; color:white; text-decoration:none; border-radius:8px;">Back to Homepage</a>',
-    unsafe_allow_html=True
-)
+# -----------------------------
+# COLOR FUNCTION
+# -----------------------------
+def color_pick(val):
+    if val == "BET THE OVER":
+        return "background-color: #d1f7c4;"  # green
+    elif val == "BET THE UNDER":
+        return "background-color: #fcd7d7;"  # red
+    elif val == "NO BET":
+        return "background-color: #f1f1f1;"  # gray
+    return ""
 
-# Load daily_model.csv
-df = pd.read_csv("daily_model.csv")
-
-# Ensure no index and auto-fit width
-st.dataframe(df, use_container_width=True, hide_index=True)
+# -----------------------------
+# DISPLAY TABLE
+# -----------------------------
+if df.empty:
+    st.warning("No games available today.")
+else:
+    styled = df.style.applymap(color_pick, subset=["Pick"])
+    st.dataframe(styled, use_container_width=True, hide_index=True)
