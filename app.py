@@ -1,11 +1,19 @@
 import streamlit as st
-from update_models import calculate_daily_model
+import pandas as pd
+from update_models import calculate_daily_model  # Make sure this returns a DataFrame
 
-st.set_page_config(page_title="MLB Daily Model")
+st.set_page_config(page_title="MLB Daily Model", layout="wide")
 st.title("MLB Daily Betting Model (Automatic)")
 
 with st.spinner("Scraping live data and calculating model..."):
-    df = calculate_daily_model()
+    try:
+        df = calculate_daily_model()
+    except Exception as e:
+        st.warning(f"⚠️ Live data failed. Loading fallback CSV. Error: {e}")
+        try:
+            df = pd.read_csv("sample_data.csv")
+        except:
+            df = pd.DataFrame()
 
 # Color function for O/U Bet column
 def color_pick(val):
@@ -14,12 +22,18 @@ def color_pick(val):
     elif val == "BET THE UNDER":
         return "background-color: #fcd7d7;"  # light red
     elif val == "NO BET":
-        return "background-color: #f1f1f1;"  # gray
+        return "background-color: #f1f1f1;"  # light gray
     return ""
 
+# Display table
 if df.empty:
     st.warning("No games available today.")
 else:
-    # Apply style and render as HTML to keep colors
-    styled = df.style.applymap(color_pick, subset=["O/U Bet"])
-    st.markdown(styled.to_html(), unsafe_allow_html=True)
+    st.subheader("Today's Model Predictions")
+
+    # Try styling only if O/U Bet column exists
+    if "O/U Bet" in df.columns:
+        styled = df.style.applymap(color_pick, subset=["O/U Bet"])
+        st.markdown(styled.to_html(index=False), unsafe_allow_html=True)
+    else:
+        st.dataframe(df, use_container_width=True)
