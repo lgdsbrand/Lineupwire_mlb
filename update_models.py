@@ -10,8 +10,8 @@ TEAM_SPLITS_CSV = "team_splits.csv"
 PITCHER_SPLITS_CSV = "pitcher_splits.csv"
 
 # Google Sheets fallbacks (replace with your real export links)
-GOOGLE_TEAM_SPLITS = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=0"
-GOOGLE_PITCHER_SPLITS = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&gid=123456789"
+GOOGLE_TEAM_SPLITS = "https://docs.google.com/spreadsheets/d/1Hbl2EHW_ac0mVa1F0lNxuaeDV2hcuo7K_Uyhb-HOU6E/edit?gid=496743641#gid=496743641/export?format=csv&gid=496743641"
+GOOGLE_PITCHER_SPLITS = "https://docs.google.com/spreadsheets/d/1Hbl2EHW_ac0mVa1F0lNxuaeDV2hcuo7K_Uyhb-HOU6E/export?format=csv&gid=313531137"
 
 CACHE_EXPIRY_HOURS = 24  # auto-refresh once per day
 
