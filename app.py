@@ -5,58 +5,64 @@ from update_models import calculate_daily_model
 # -----------------------------
 # STREAMLIT PAGE CONFIG
 # -----------------------------
-st.set_page_config(
-    page_title="MLB Daily Betting Model",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="MLB Daily Model", layout="wide")
 
-# Hide Streamlit default menu and footer
+# Hide Streamlit menu & footer for a cleaner UI
 hide_streamlit_style = """
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-</style>
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # -----------------------------
-# PAGE HEADER
+# HEADER
 # -----------------------------
-st.markdown("[⬅️ Back to Homepage](https://lgdsbrand.streamlit.app)", unsafe_allow_html=True)
-st.title("MLB Daily Betting Model (Automatic)")
+col1, col2 = st.columns([8,2])
+with col1:
+    st.title("⚾ MLB Daily Model")
+with col2:
+    st.markdown(
+        """
+        <a href="/" target="_self">
+            <button style="background-color:#1f77b4;color:white;padding:8px 12px;border:none;border-radius:5px;cursor:pointer;">
+            Back to Homepage
+            </button>
+        </a>
+        """, 
+        unsafe_allow_html=True
+    )
+
+st.write("Model auto-updates daily with real stats and FanDuel O/U lines.")
+
+# -----------------------------
+# CALCULATE MODEL
+# -----------------------------
+with st.spinner("Calculating today's model..."):
+    df = calculate_daily_model()
+
+if df.empty:
+    st.warning("No MLB games found for today.")
+else:
+    # Remove index for cleaner view
+    df_reset = df.reset_index(drop=True)
+    
+    # Style O/U Bet column
+    def style_ou(val):
+        if val == "BET THE OVER":
+            return "background-color: #d4f7d4; color: black;"  # green
+        elif val == "BET THE UNDER":
+            return "background-color: #f7d4d4; color: black;"  # red
+        else:
+            return "background-color: #f0f0f0; color: black;"  # gray
+
+    st.subheader("📊 Daily Score & O/U Predictions")
+    st.dataframe(
+        df_reset.style.applymap(style_ou, subset=["O/U Bet"]),
+        use_container_width=True
+    )
+
 st.markdown("---")
-
-# -----------------------------
-# LOAD DAILY MODEL DATA
-# -----------------------------
-df = calculate_daily_model()
-
-# Expected 9 columns
-expected_cols = [
-    "Game Time", "Away Team", "Away Score",
-    "Home Team", "Home Score", "ML (%)",
-    "Book O/U", "Model O/U", "O/U Bet"
-]
-
-# Reindex to ensure all expected columns exist
-df = df.reindex(columns=expected_cols)
-
-# -----------------------------
-# STYLE THE TABLE
-# -----------------------------
-def color_ou(val):
-    if val == "BET THE OVER":
-        return "background-color: #d1f7c4; color: black; font-weight: bold;"  # green
-    elif val == "BET THE UNDER":
-        return "background-color: #fcd7d7; color: black; font-weight: bold;"  # red
-    elif val == "NO BET":
-        return "background-color: #f1f1f1; color: black;"  # grey
-    else:
-        return ""
-
-styled_df = df.style.applymap(color_ou, subset=["O/U Bet"])
-
-# Display table without index
-st.dataframe(styled_df, use_container_width=True, hide_index=True)
+st.caption("Data Sources: ESPN, TeamRankings, FanGraphs, Baseball Reference, BallparkPal, Sonny Moore, FanDuel Odds")
