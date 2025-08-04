@@ -1,24 +1,36 @@
 import pandas as pd
 import requests
 from datetime import datetime
+from bs4 import BeautifulSoup
+import numpy as np
+import streamlit as st
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
-FANDUEL_URL = "https://sportsbook.fanduel.com/cache/psmg/UK/2/baseball/mlb"  # endpoint may need rotating proxy in production
+BALLPARKPAL_URL = "https://www.ballparkpal.com/mlb/"
+SONNY_MOORE_URL = "https://sonnymoorepowerratings.com/mlb.htm"
 
 # Model Weights
-WEIGHT_TEAM_AVG = 0.4    # Team season runs per game
-WEIGHT_PITCHER = 0.3     # Starting pitcher runs allowed / ERA
-WEIGHT_BULLPEN = 0.2     # Bullpen runs allowed
-WEIGHT_PARK = 0.1        # Ballpark scoring factor
+WEIGHTS = {
+    "team_rpg": 0.25,
+    "team_rpg_l5": 0.15,
+    "opp_rpga": 0.20,
+    "opp_rpga_l5": 0.10,
+    "wrc_plus": 0.05,
+    "ba_vs_hand": 0.05,
+    "sp_fip": 0.05,
+    "bullpen_siera": 0.10,
+    "park_factor": 0.05
+}
+HOME_FIELD_ADV = 0.15
 
-# --------------------------------
-# Scraping Functions
-# --------------------------------
+# -----------------------------
+# SCRAPING HELPERS
+# -----------------------------
 def get_espn_games():
-    """Scrape ESPN for today's MLB games"""
+    """Scrape today's MLB schedule with starting pitchers"""
     today = datetime.now().strftime("%Y%m%d")
     resp = requests.get(f"{ESPN_URL}?dates={today}").json()
     games = []
@@ -27,10 +39,8 @@ def get_espn_games():
         home = comp["competitors"][0]
         away = comp["competitors"][1]
 
-        # Game Time
         game_time = datetime.fromisoformat(comp["date"][:-1]).strftime("%I:%M %p")
 
-        # Pitchers
         home_pitcher = home.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
         away_pitcher = away.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
 
@@ -43,14 +53,48 @@ def get_espn_games():
         })
     return pd.DataFrame(games)
 
-def scrape_fanduel_ou():
-    """Placeholder: returns dictionary of team matchup -> O/U line.
-       Replace with real FanDuel scraper if needed."""
-    return {}
 
-# --------------------------------
-# Model Calculation
-# --------------------------------
+def get_sonny_moore_ratings():
+    """Scrape Sonny Moore power ratings for MLB teams"""
+    resp = requests.get(SONNY_MOORE_URL)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    text = soup.get_text()
+    lines = text.splitlines()
+    
+    ratings = {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 3:
+            try:
+                rating = float(parts[-1])
+                team_name = " ".join(parts[1:-1])
+                ratings[team_name] = rating
+            except:
+                continue
+    return ratings
+
+
+def get_ballpark_factors():
+    """Scrape BallparkPal scoring factors"""
+    resp = requests.get(BALLPARKPAL_URL)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    factors = {}
+    for row in soup.find_all("tr")[1:]:
+        cols = row.find_all("td")
+        if len(cols) > 1:
+            team = cols[0].get_text(strip=True)
+            try:
+                factor = float(cols[1].get_text(strip=True))
+                factors[team] = factor
+            except:
+                continue
+    return factors
+
+
+# -----------------------------
+# MODEL CALCULATION (CACHED)
+# -----------------------------
+@st.cache_data(ttl=86400)  # Cache for 24 hours
 def calculate_daily_model():
     games_df = get_espn_games()
     if games_df.empty:
@@ -58,6 +102,9 @@ def calculate_daily_model():
             "Game Time","Away Team","Away Score","Home Team","Home Score",
             "ML (%)","Book O/U","Model O/U","O/U Bet"
         ])
+
+    sonny_ratings = get_sonny_moore_ratings()
+    park_factors = get_ballpark_factors()
 
     results = []
     for _, row in games_df.iterrows():
@@ -77,42 +124,66 @@ def calculate_daily_model():
             continue
 
         # -----------------------------
-        # Dummy Stats for Formula (replace with your real data source)
+        # LIVE STAT SCRAPING (replace dummy with real)
         # -----------------------------
-        team_runs_per_game_home = 4.5
-        team_runs_per_game_away = 4.3
-        pitcher_home_era = 3.8
-        pitcher_away_era = 4.2
-        bullpen_home_ra = 3.9
-        bullpen_away_ra = 4.1
-        park_factor = 1.02  # >1 favors runs, <1 favors pitchers
+        # In production: integrate TeamRankings + FanGraphs + ESPN/BR here.
+        # For now, simulate realistic numbers:
+        team_rpg_home = 4.5
+        team_rpg_away = 4.3
+        team_rpg_l5_home = 4.8
+        team_rpg_l5_away = 4.4
+        team_rpga_home = 4.1
+        team_rpga_away = 4.2
+        team_rpga_l5_home = 4.0
+        team_rpga_l5_away = 4.5
+        wrc_home = 105
+        wrc_away = 102
+        ba_vs_home = 0.255
+        ba_vs_away = 0.248
+        sp_fip_home = 3.7
+        sp_fip_away = 4.2
+        bp_siera_home = 3.9
+        bp_siera_away = 4.0
+        park_factor_home = park_factors.get(row["Home Team"], 1.0)
 
         # -----------------------------
         # Weighted Score Prediction
         # -----------------------------
-        home_score = (
-            team_runs_per_game_home * WEIGHT_TEAM_AVG +
-            pitcher_away_era * WEIGHT_PITCHER +
-            bullpen_away_ra * WEIGHT_BULLPEN
-        ) * park_factor
-
         away_score = (
-            team_runs_per_game_away * WEIGHT_TEAM_AVG +
-            pitcher_home_era * WEIGHT_PITCHER +
-            bullpen_home_ra * WEIGHT_BULLPEN
-        ) * park_factor
+            team_rpg_away * WEIGHTS["team_rpg"] +
+            team_rpg_l5_away * WEIGHTS["team_rpg_l5"] +
+            team_rpga_home * WEIGHTS["opp_rpga"] +
+            team_rpga_l5_home * WEIGHTS["opp_rpga_l5"] +
+            wrc_away/100 * WEIGHTS["wrc_plus"] +
+            ba_vs_away * WEIGHTS["ba_vs_hand"] +
+            sp_fip_home/5 * WEIGHTS["sp_fip"] +
+            bp_siera_home/5 * WEIGHTS["bullpen_siera"]
+        ) * park_factor_home
+
+        home_score = (
+            team_rpg_home * WEIGHTS["team_rpg"] +
+            team_rpg_l5_home * WEIGHTS["team_rpg_l5"] +
+            team_rpga_away * WEIGHTS["opp_rpga"] +
+            team_rpga_l5_away * WEIGHTS["opp_rpga_l5"] +
+            wrc_home/100 * WEIGHTS["wrc_plus"] +
+            ba_vs_home * WEIGHTS["ba_vs_hand"] +
+            sp_fip_away/5 * WEIGHTS["sp_fip"] +
+            bp_siera_away/5 * WEIGHTS["bullpen_siera"]
+        ) * park_factor_home + HOME_FIELD_ADV
 
         home_score = round(home_score, 1)
         away_score = round(away_score, 1)
         model_total = round(home_score + away_score, 1)
 
-        # Moneyline Win Probability (approximate)
-        home_prob = round((home_score / model_total) * 100, 1)
+        # Moneyline % using scoring + Sonny Moore
+        home_prob = (home_score / (home_score + away_score)) * 100
+        sonny_home = sonny_ratings.get(row["Home Team"], 150)
+        sonny_away = sonny_ratings.get(row["Away Team"], 150)
+        sonny_adj = (sonny_home - sonny_away) / 50  # small weight
+        ml_pct = round(min(max(home_prob + sonny_adj, 0), 100), 1)
 
-        # Sportsbook O/U (placeholder)
+        # Sportsbook O/U placeholder
         book_total = 9.0
-
-        # Determine O/U Bet
         diff = model_total - book_total
         if diff >= 2:
             ou_bet = "BET THE OVER"
@@ -127,7 +198,7 @@ def calculate_daily_model():
             "Away Score": away_score,
             "Home Team": row["Home Team"],
             "Home Score": home_score,
-            "ML (%)": home_prob,
+            "ML (%)": ml_pct,
             "Book O/U": book_total,
             "Model O/U": model_total,
             "O/U Bet": ou_bet
