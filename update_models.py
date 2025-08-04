@@ -1,5 +1,29 @@
 import pandas as pd
 import requests
+
+def run_scrape_diagnostics():
+    urls = {
+        "team_rpg": "https://www.teamrankings.com/mlb/stat/runs-per-game",
+        "team_rpga": "https://www.teamrankings.com/mlb/stat/opponent-runs-per-game",
+        "woba": "https://baseballsavant.mlb.com/leaderboard/custom?type=batter&year=2025&split=&team=&min=0&csv=true",
+        "bullpen": "https://www.covers.com/sport/baseball/mlb/statistics/team-bullpenera/2025",
+        "sp_stats": "https://www.baseball-reference.com/leagues/majors/2025-standard-pitching.shtml"
+    }
+
+    results = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    for name, url in urls.items():
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            df_list = pd.read_html(resp.text)
+            results[name] = f"✅ {len(df_list)} tables found"
+        except Exception as e:
+            results[name] = f"❌ Failed: {str(e)[:100]}"
+    return results
+    
+import pandas as pd
+import requests
 from datetime import datetime
 import numpy as np
 
