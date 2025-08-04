@@ -1,32 +1,14 @@
 import streamlit as st
-import pandas as pd
-import os
 from update_models import calculate_daily_model
 
-# -----------------------------
-# PAGE CONFIG
-# -----------------------------
-st.set_page_config(page_title="Daily MLB Betting Model", layout="wide")
+st.set_page_config(page_title="MLB Daily Model", layout="wide")
 
-st.title("Daily MLB Betting Model")
-st.markdown("[⬅️ Back to Homepage](https://lineupwire.com)")
+st.title("MLB Daily Betting Model (Fully Automatic)")
 
-# -----------------------------
-# LOAD PREDICTIONS WITH FALLBACK
-# -----------------------------
-try:
+with st.spinner("Scraping live data and calculating model predictions..."):
     df = calculate_daily_model()
-except Exception as e:
-    st.warning(f"⚠️ Live model failed: {e}. Loading last saved CSV.")
-    if os.path.exists("daily_model.csv"):
-        df = pd.read_csv("daily_model.csv")
-    else:
-        st.error("❌ No live data or saved CSV available.")
-        st.stop()
 
-# -----------------------------
-# COLOR FUNCTION
-# -----------------------------
+# Color function for picks
 def color_pick(val):
     if val == "BET THE OVER":
         return "background-color: #d1f7c4;"  # green
@@ -36,9 +18,6 @@ def color_pick(val):
         return "background-color: #f1f1f1;"  # gray
     return ""
 
-# -----------------------------
-# DISPLAY TABLE
-# -----------------------------
 if df.empty:
     st.warning("No games available today.")
 else:
