@@ -26,7 +26,6 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 # -----------------------------
 st.markdown("[⬅️ Back to Homepage](https://lgdsbrand.streamlit.app)", unsafe_allow_html=True)
 st.title("MLB Daily Betting Model (Automatic)")
-
 st.markdown("---")
 
 # -----------------------------
@@ -34,13 +33,15 @@ st.markdown("---")
 # -----------------------------
 df = calculate_daily_model()
 
-# Ensure the 9 clean columns
-display_cols = [
+# Expected 9 columns
+expected_cols = [
     "Game Time", "Away Team", "Away Score",
     "Home Team", "Home Score", "ML (%)",
     "Book O/U", "Model O/U", "O/U Bet"
 ]
-df = df[display_cols]
+
+# Reindex to ensure all expected columns exist
+df = df.reindex(columns=expected_cols)
 
 # -----------------------------
 # STYLE THE TABLE
@@ -57,4 +58,5 @@ def color_ou(val):
 
 styled_df = df.style.applymap(color_ou, subset=["O/U Bet"])
 
+# Display table without index
 st.dataframe(styled_df, use_container_width=True, hide_index=True)
