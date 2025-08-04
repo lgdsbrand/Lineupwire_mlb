@@ -4,38 +4,44 @@ import requests
 # -------------------------------
 # TEAM NAME NORMALIZATION
 # -------------------------------
-TEAM_MAP = {
-    "Arizona Diamondbacks": "Arizona",
-    "Atlanta Braves": "Atlanta",
-    "Baltimore Orioles": "Baltimore",
-    "Boston Red Sox": "Boston",
-    "Chicago Cubs": "Chi Cubs",
-    "Chicago White Sox": "Chi Sox",
-    "Cincinnati Reds": "Cincinnati",
-    "Cleveland Guardians": "Cleveland",
-    "Colorado Rockies": "Colorado",
-    "Detroit Tigers": "Detroit",
-    "Houston Astros": "Houston",
-    "Kansas City Royals": "Kansas City",
-    "Los Angeles Angels": "LA Angels",
-    "Los Angeles Dodgers": "LA Dodgers",
-    "Miami Marlins": "Miami",
-    "Milwaukee Brewers": "Milwaukee",
-    "Minnesota Twins": "Minnesota",
-    "New York Mets": "NY Mets",
-    "New York Yankees": "NY Yankees",
-    "Oakland Athletics": "Oakland",
-    "Philadelphia Phillies": "Philadelphia",
-    "Pittsburgh Pirates": "Pittsburgh",
-    "San Diego Padres": "San Diego",
-    "San Francisco Giants": "SF Giants",
-    "Seattle Mariners": "Seattle",
-    "St. Louis Cardinals": "St. Louis",
-    "Tampa Bay Rays": "Tampa Bay",
-    "Texas Rangers": "Texas",
-    "Toronto Blue Jays": "Toronto",
-    "Washington Nationals": "Washington"
+TEAM_NAME_MAP = {
+    "Arizona Diamondbacks": "AZ",
+    "Atlanta Braves": "ATL",
+    "Baltimore Orioles": "BAL",
+    "Boston Red Sox": "BOS",
+    "Chicago Cubs": "CHC",
+    "Chicago White Sox": "CHW",
+    "Cincinnati Reds": "CIN",
+    "Cleveland Guardians": "CLE",
+    "Colorado Rockies": "COL",
+    "Detroit Tigers": "DET",
+    "Houston Astros": "HOU",
+    "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA",
+    "Los Angeles Dodgers": "LAD",
+    "Miami Marlins": "MIA",
+    "Milwaukee Brewers": "MIL",
+    "Minnesota Twins": "MIN",
+    "New York Mets": "NYM",
+    "New York Yankees": "NYY",
+    "Oakland Athletics": "ATH",
+    "Philadelphia Phillies": "PHI",
+    "Pittsburgh Pirates": "PIT",
+    "San Diego Padres": "SD",
+    "San Francisco Giants": "SF",
+    "Seattle Mariners": "SEA",
+    "St. Louis Cardinals": "STL",
+    "Tampa Bay Rays": "TB",
+    "Texas Rangers": "TEX",
+    "Toronto Blue Jays": "TOR",
+    "Washington Nationals": "WSH"
 }
+
+def normalize_team_names(df):
+    """Convert full team names to 3-letter codes for merging"""
+    if 'Team' in df.columns:
+        df['Team'] = df['Team'].map(TEAM_NAME_MAP).fillna(df['Team'])
+    return df
 
 def normalize_team_names(df):
     """Map team names to match Google Sheet short names."""
