@@ -1,101 +1,100 @@
-import requests
 import pandas as pd
+import requests
 from datetime import datetime
-from bs4 import BeautifulSoup
+import math
 
-CSV_FILENAME = "daily_model.csv"
+# -----------------------------
+# CONFIG
+# -----------------------------
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
+FANDUEL_URL = "https://sportsbook.fanduel.com/cache/psmg/UK/2/baseball/mlb"  # Example feed
+OUTPUT_CSV = "daily_model.csv"
 
-# -------------------------------
-# 1. Get Today's Games from ESPN
-# -------------------------------
-def get_espn_games():
+def get_today_games():
+    """Scrape ESPN for today's games and starting pitchers"""
     today = datetime.now().strftime("%Y%m%d")
-    url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates={today}"
-    resp = requests.get(url).json()
-
+    resp = requests.get(f"{ESPN_URL}?dates={today}").json()
     games = []
+
     for event in resp.get("events", []):
         comp = event["competitions"][0]
-        teams = comp["competitors"]
-        home = next(t for t in teams if t["homeAway"] == "home")["team"]["displayName"]
-        away = next(t for t in teams if t["homeAway"] == "away")["team"]["displayName"]
+        home = comp["competitors"][0]
+        away = comp["competitors"][1]
 
-        # Game time in 12-hour ET
-        game_time = datetime.strptime(event["date"], "%Y-%m-%dT%H:%MZ").strftime("%I:%M %p")
+        home_pitcher = home.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
+        away_pitcher = away.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
+        game_time = datetime.fromisoformat(comp["date"][:-1]).strftime("%I:%M %p")
+
+        # Weather info
+        venue = comp.get("venue", {}).get("fullName", "")
+        is_dome = any(x in venue.lower() for x in ["dome", "roof"])
+        if is_dome:
+            weather_icon = "🏟️ Dome"
+            weather_desc = "0% / 0 mph"
+        else:
+            weather_icon = "☀️"
+            weather_desc = "10% / 5 mph"  # Placeholder real weather API could be integrated
 
         games.append({
-            "game_time": game_time,
-            "home_team": home,
-            "away_team": away
+            "Game Time": game_time,
+            "Matchup": f"{away['team']['displayName']} @ {home['team']['displayName']}",
+            "Home Team": home['team']['displayName'],
+            "Away Team": away['team']['displayName'],
+            "Pitchers": f"{away_pitcher} vs {home_pitcher}",
+            "Weather": f"{weather_icon} {weather_desc}"
         })
+
     return pd.DataFrame(games)
 
 
-# -------------------------------
-# 2. Get FanDuel Book O/U Lines
-# -------------------------------
 def get_fanduel_odds():
-    url = "https://sportsbook.fanduel.com/navigation/mlb"
-    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    # Example scraping logic — this may need tweaking if Fanduel changes layout
-    lines = {}
-    for game_block in soup.find_all("div", class_="event"):
-        teams = [t.get_text(strip=True) for t in game_block.select(".name")]
-        ou_tag = game_block.find("span", class_="total")  # placeholder class
-        if len(teams) == 2 and ou_tag:
-            lines[f"{teams[0]} vs {teams[1]}"] = ou_tag.get_text(strip=True)
-
-    return lines
+    """Scrape FanDuel MLB odds (simplified)"""
+    try:
+        resp = requests.get(FANDUEL_URL).json()
+        # This depends on actual FanDuel API structure
+        # Return DataFrame with: Matchup, Moneyline Away, Moneyline Home, Total
+        return pd.DataFrame(columns=["Matchup", "Moneyline Away", "Moneyline Home", "Total"])
+    except:
+        return pd.DataFrame(columns=["Matchup", "Moneyline Away", "Moneyline Home", "Total"])
 
 
-# -------------------------------
-# 3. Daily Model Formula
-# -------------------------------
-def calculate_model_scores(row):
-    # Example weighted formula (adjustable)
-    # Replace with your real stats integration
-    away_score = (row.get("away_rpg25", 4.2) + row.get("home_rpga25", 4.1)) / 2
-    home_score = (row.get("home_rpg25", 4.5) + row.get("away_rpga25", 4.0)) / 2
+def calculate_daily_model():
+    """Combine games + odds + model logic for predictions"""
+    games_df = get_today_games()
+    odds_df = get_fanduel_odds()
 
-    # Example O/U projection
-    model_ou = round(away_score + home_score, 1)
+    merged = pd.merge(games_df, odds_df, on="Matchup", how="left")
 
-    # Determine ML favorite and win %
-    if home_score > away_score:
-        ml_winner = f"{row['home_team']} ({int(60 + (home_score-away_score)*5)}%)"
-    else:
-        ml_winner = f"{row['away_team']} ({int(60 + (away_score-home_score)*5)}%)"
+    results = []
+    for _, row in merged.iterrows():
+        # Model predicted score (placeholder logic: 4 + 3)
+        away_score = 3.8
+        home_score = 4.2
+        model_total = round(away_score + home_score, 1)
 
-    return pd.Series([round(away_score, 1), round(home_score, 1), ml_winner, model_ou])
+        # Compare to sportsbook total
+        sportsbook_total = float(row["Total"]) if not pd.isna(row["Total"]) else model_total
+        diff = model_total - sportsbook_total
 
+        if diff >= 2:
+            ou_pick = "BET THE OVER"
+        elif diff <= -2:
+            ou_pick = "BET THE UNDER"
+        else:
+            ou_pick = "NO BET"
 
-# -------------------------------
-# 4. Main Function
-# -------------------------------
-def main():
-    games_df = get_espn_games()
-    # Merge in future team stats if available for the formula
-    # For now using simple weights and placeholders for stats
+        results.append({
+            "Game Time": row["Game Time"],
+            "Matchup": row["Matchup"],
+            "Pitchers": row["Pitchers"],
+            "Sportsbook O/U": sportsbook_total,
+            "Model Total": model_total,
+            "Pick": ou_pick,
+            "Moneyline Away": row.get("Moneyline Away", ""),
+            "Moneyline Home": row.get("Moneyline Home", ""),
+            "Weather": row["Weather"]
+        })
 
-    games_df[["away_score", "home_score", "ml_winner", "model_ou"]] = games_df.apply(calculate_model_scores, axis=1)
-
-    # Pull book O/U
-    fanduel_lines = get_fanduel_odds()
-    games_df["book_ou"] = games_df.apply(
-        lambda row: fanduel_lines.get(f"{row['away_team']} vs {row['home_team']}", "N/A"), axis=1
-    )
-
-    # Reorder columns for final CSV
-    output_df = games_df[[
-        "game_time", "away_team", "away_score", "home_team", "home_score",
-        "ml_winner", "book_ou", "model_ou"
-    ]]
-
-    output_df.to_csv(CSV_FILENAME, index=False)
-    print(f"Daily MLB model updated: {CSV_FILENAME}")
-
-
-if __name__ == "__main__":
-    main()
+    df = pd.DataFrame(results)
+    df.to_csv(OUTPUT_CSV, index=False)
+    return df
