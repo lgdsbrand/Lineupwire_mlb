@@ -27,7 +27,8 @@ with col2:
     st.markdown(
         """
         <a href="/" target="_self">
-            <button style="background-color:#1f77b4;color:white;padding:8px 12px;border:none;border-radius:5px;cursor:pointer;">
+            <button style="background-color:#1f77b4;color:white;
+            padding:8px 12px;border:none;border-radius:5px;cursor:pointer;">
             Back to Homepage
             </button>
         </a>
@@ -49,7 +50,7 @@ else:
     # Remove index for cleaner view
     df_reset = df.reset_index(drop=True)
     
-    # Style O/U Bet column
+    # Style function for O/U Bet column
     def style_ou(val):
         if val == "BET THE OVER":
             return "background-color: #d4f7d4; color: black;"  # green
@@ -58,11 +59,14 @@ else:
         else:
             return "background-color: #f0f0f0; color: black;"  # gray
 
+    # Convert to HTML because st.dataframe cannot handle Styler objects
+    styled_html = df_reset.style.applymap(style_ou, subset=["O/U Bet"]).to_html()
+    
     st.subheader("📊 Daily Score & O/U Predictions")
-
-# Create styled DataFrame as HTML because st.dataframe can't handle Styler
-styled_html = df_reset.style.applymap(style_ou, subset=["O/U Bet"]).to_html()
-st.markdown(styled_html, unsafe_allow_html=True)
+    st.markdown(styled_html, unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("Data Sources: ESPN, TeamRankings, FanGraphs, Baseball Reference, BallparkPal, Sonny Moore, FanDuel Odds")
+st.caption(
+    "Data Sources: ESPN, TeamRankings, FanGraphs, Baseball Reference, "
+    "BallparkPal, Sonny Moore, FanDuel Odds"
+)
