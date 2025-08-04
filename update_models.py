@@ -1,86 +1,107 @@
 import pandas as pd
 import requests
 
-# -------------------------
-# CONFIG
-# -------------------------
-GOOGLE_SHEET_RPG = "https://docs.google.com/spreadsheets/d/1Hbl2EHW_ac0mVa1F0lNxuaeDV2hcuo7K_Uyhb-HOU6E/export?format=csv"
-ROBA_CSV = "team_rOBA.csv"
+# -------------------------------
+# TEAM NAME NORMALIZATION
+# -------------------------------
+TEAM_MAP = {
+    "Arizona Diamondbacks": "Arizona",
+    "Atlanta Braves": "Atlanta",
+    "Baltimore Orioles": "Baltimore",
+    "Boston Red Sox": "Boston",
+    "Chicago Cubs": "Chi Cubs",
+    "Chicago White Sox": "Chi Sox",
+    "Cincinnati Reds": "Cincinnati",
+    "Cleveland Guardians": "Cleveland",
+    "Colorado Rockies": "Colorado",
+    "Detroit Tigers": "Detroit",
+    "Houston Astros": "Houston",
+    "Kansas City Royals": "Kansas City",
+    "Los Angeles Angels": "LA Angels",
+    "Los Angeles Dodgers": "LA Dodgers",
+    "Miami Marlins": "Miami",
+    "Milwaukee Brewers": "Milwaukee",
+    "Minnesota Twins": "Minnesota",
+    "New York Mets": "NY Mets",
+    "New York Yankees": "NY Yankees",
+    "Oakland Athletics": "Oakland",
+    "Philadelphia Phillies": "Philadelphia",
+    "Pittsburgh Pirates": "Pittsburgh",
+    "San Diego Padres": "San Diego",
+    "San Francisco Giants": "SF Giants",
+    "Seattle Mariners": "Seattle",
+    "St. Louis Cardinals": "St. Louis",
+    "Tampa Bay Rays": "Tampa Bay",
+    "Texas Rangers": "Texas",
+    "Toronto Blue Jays": "Toronto",
+    "Washington Nationals": "Washington"
+}
 
-# -------------------------
-# LOAD FUNCTIONS
-# -------------------------
+def normalize_team_names(df):
+    """Map team names to match Google Sheet short names."""
+    if 'Team' in df.columns:
+        df['Team'] = df['Team'].replace(TEAM_MAP)
+    return df
 
+# -------------------------------
+# LOAD FUNCTIONS (CSV fallback for now)
+# -------------------------------
 def load_team_rpg():
-    """Load team RPG and RPGa from Google Sheet CSV"""
-    try:
-        df = pd.read_csv(GOOGLE_SHEET_RPG)
-        df = df[['Team', 'RPG', 'RPGa']]  # Adjust to your column names
-        return df
-    except Exception as e:
-        print(f"Failed to load RPG from Google Sheets: {e}")
-        return pd.DataFrame(columns=['Team','RPG','RPGa'])
+    df = pd.read_csv("team_rpg.csv")  # already exported from Google Sheet
+    df = normalize_team_names(df)
+    return df[['Team','RPG']]
+
+def load_team_rpga():
+    df = pd.read_csv("team_rpga.csv")
+    df = normalize_team_names(df)
+    return df[['Team','RPGA']]
 
 def load_roba():
-    """Load team rOBA from local CSV"""
-    try:
-        df = pd.read_csv(ROBA_CSV)
-        df = df[['Tm', 'rOBA']]  # Adjust to your CSV columns
-        df.rename(columns={'Tm':'Team'}, inplace=True)
-        return df
-    except Exception as e:
-        print(f"Failed to load rOBA: {e}")
-        return pd.DataFrame(columns=['Team','rOBA'])
+    df = pd.read_csv("team_roba.csv")  # CSV exported from Baseball Reference
+    df = normalize_team_names(df)
+    return df[['Team','rOBA']]
 
 def load_bullpen():
-    """Scrape bullpen ERA & WHIP from Covers"""
-    url = "https://www.covers.com/sport/baseball/mlb/statistics/team-bullpenera/2025"
-    try:
-        tables = pd.read_html(url)
-        df = tables[0]
-        df = df[['Team','ERA','WHIP']]
-        df.rename(columns={'ERA':'Bullpen_ERA','WHIP':'Bullpen_WHIP'}, inplace=True)
-        return df
-    except Exception as e:
-        print(f"Failed to scrape bullpen stats: {e}")
-        return pd.DataFrame(columns=['Team','Bullpen_ERA','Bullpen_WHIP'])
+    df = pd.read_csv("bullpen_stats.csv")  # CSV exported or scraped
+    df = normalize_team_names(df)
+    return df[['Team','Bullpen_ERA','Bullpen_WHIP']]
 
 def load_sp_stats():
-    """Scrape SP ERA & FIP from Baseball Reference"""
-    url = "https://www.baseball-reference.com/leagues/majors/2025-standard-pitching.shtml"
-    try:
-        tables = pd.read_html(url)
-        df = tables[0]
-        df = df[['Tm','ERA','FIP']]
-        df.rename(columns={'Tm':'Team','ERA':'SP_ERA','FIP':'SP_FIP'}, inplace=True)
-        return df
-    except Exception as e:
-        print(f"Failed to scrape SP stats: {e}")
-        return pd.DataFrame(columns=['Team','SP_ERA','SP_FIP'])
+    df = pd.read_csv("sp_stats.csv")  # CSV exported or scraped
+    df = normalize_team_names(df)
+    return df[['Team','SP_ERA','SP_FIP']]
 
-# -------------------------
-# COMBINE INTO DAILY MODEL
-# -------------------------
-
+# -------------------------------
+# CALCULATE DAILY MODEL
+# -------------------------------
 def calculate_daily_model():
-    """Main function to calculate daily MLB model"""
+    """Main function to calculate daily MLB model."""
 
+    # Load all datasets
     team_rpg = load_team_rpg()
+    team_rpga = load_team_rpga()
     roba = load_roba()
     bullpen = load_bullpen()
     sp_stats = load_sp_stats()
 
-    # Merge all data
-    df = team_rpg.merge(roba, on='Team', how='outer')
+    # Merge all sources
+    df = team_rpg.merge(team_rpga, on='Team', how='outer')
+    df = df.merge(roba, on='Team', how='outer')
     df = df.merge(bullpen, on='Team', how='outer')
     df = df.merge(sp_stats, on='Team', how='outer')
 
-    # Example model total (replace with your real formula/weights)
-    df['Model_Total'] = df[['RPG','RPGa']].mean(axis=1)
+    # Diagnostic: show any teams that are missing values
+    missing = df[df.isna().any(axis=1)]
+    if not missing.empty:
+        print("⚠️ Teams with missing stats after merge:")
+        print(missing[['Team']])
 
-    # Simple O/U bet logic
+    # Example Model Total (replace with weighted formula later)
+    df['Model_Total'] = df[['RPG','RPGA']].sum(axis=1)
+
+    # Example simple O/U bet rule
     df['O/U Bet'] = df['Model_Total'].apply(
-        lambda x: "BET THE OVER" if x >= 1 else "NO BET"
+        lambda x: "BET THE OVER" if x >= 10 else "NO BET"
     )
 
     return df
