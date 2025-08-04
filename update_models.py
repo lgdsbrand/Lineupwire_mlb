@@ -106,6 +106,14 @@ def scrape_starting_pitchers():
 # -----------------------------
 
 def calculate_daily_model():
+    # Run diagnostics first
+    print("Running scrape diagnostics...")
+    diag_results = run_scrape_diagnostics()
+    print(diag_results)
+
+    # Optional: return this to Streamlit if blank
+    df_diag = pd.DataFrame(list(diag_results.items()), columns=["Source", "Status"])
+    return df_diag
     schedule = get_mlb_schedule()
     team_rpg = scrape_team_rpg()
     bullpen = scrape_bullpen_stats()
