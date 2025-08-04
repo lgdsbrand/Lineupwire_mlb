@@ -1,28 +1,23 @@
 import pandas as pd
 import requests
 from datetime import datetime
+import numpy as np
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
 TEAM_RPG_URL = "https://www.teamrankings.com/mlb/stat/runs-per-game"
-TEAM_RPGA_URL = "https://www.teamrankings.com/mlb/stat/opponent-runs-per-game"
 BULLPEN_URL = "https://www.covers.com/sport/baseball/mlb/statistics/team-bullpenera/2025"
+SP_BBREF_URL = "https://www.baseball-reference.com/leagues/majors/2025-standard-pitching.shtml"
 
-# Fangraphs CSV for 2025 Starting Pitcher Standard Stats
-SP_CSV_URL = "https://www.fangraphs.com/leaders.aspx?pos=all&stats=sta&lg=all&qual=0&type=8&season=2025&month=0&season1=2025&ind=0&team=0&rost=0&age=0&filter=&players=0&startdate=2025-01-01&enddate=2025-12-31&sort=20,d&csv=1"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # -----------------------------
 # SCRAPING FUNCTIONS
 # -----------------------------
 
 def get_mlb_schedule():
-    """Scrape ESPN for today's MLB games and probable pitchers"""
     today = datetime.now().strftime("%Y%m%d")
     resp = requests.get(f"{ESPN_URL}?dates={today}").json()
     games = []
@@ -32,7 +27,6 @@ def get_mlb_schedule():
         home = comp["competitors"][0]
         away = comp["competitors"][1]
 
-        # Probable pitchers if available
         home_pitcher = home.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
         away_pitcher = away.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
 
@@ -55,42 +49,33 @@ def scrape_team_rpg():
         df = pd.read_html(TEAM_RPG_URL)[0][['Team', '2025']]
         df.columns = ['Team', 'RPG']
         return df
-    except Exception as e:
-        print("Team RPG scrape failed:", e)
+    except:
         return pd.DataFrame(columns=['Team','RPG'])
-
-def scrape_team_rpga():
-    try:
-        df = pd.read_html(TEAM_RPGA_URL)[0][['Team', '2025']]
-        df.columns = ['Team', 'RPGa']
-        return df
-    except Exception as e:
-        print("Team RPGa scrape failed:", e)
-        return pd.DataFrame(columns=['Team','RPGa'])
 
 def scrape_bullpen_stats():
     try:
         df = pd.read_html(BULLPEN_URL)[0]
-        # Clean columns
         df.columns = [c.strip() for c in df.columns]
-        # Expecting columns like: Team, ERA, WHIP
         df = df[['Team', 'ERA', 'WHIP']]
         df.rename(columns={'ERA':'Bullpen_ERA','WHIP':'Bullpen_WHIP'}, inplace=True)
         return df
-    except Exception as e:
-        print("Bullpen scrape failed:", e)
+    except:
         return pd.DataFrame(columns=['Team','Bullpen_ERA','Bullpen_WHIP'])
 
 def scrape_starting_pitchers():
     try:
-        df = pd.read_csv(SP_CSV_URL)
-        # Keep only needed columns
-        df = df[['Name','Team','ERA','FIP','WHIP']]
-        df.rename(columns={'Name':'Pitcher'}, inplace=True)
+        tables = pd.read_html(SP_BBREF_URL)
+        df = tables[0]
+
+        # Clean aggregate rows like 'LgAvg', 'AL', 'NL'
+        df = df[~df['Tm'].isin(['Tm','LgAvg','AL','NL'])]
+
+        # BR doesn't have FIP, but we use ERA + WHIP
+        df = df[['Name','Tm','ERA','WHIP']]
+        df.rename(columns={'Name':'Pitcher','Tm':'Team'}, inplace=True)
         return df
-    except Exception as e:
-        print("SP scrape failed:", e)
-        return pd.DataFrame(columns=['Pitcher','Team','ERA','FIP','WHIP'])
+    except:
+        return pd.DataFrame(columns=['Pitcher','Team','ERA','WHIP'])
 
 # -----------------------------
 # MODEL CALCULATION
@@ -99,7 +84,6 @@ def scrape_starting_pitchers():
 def calculate_daily_model():
     schedule = get_mlb_schedule()
     team_rpg = scrape_team_rpg()
-    team_rpga = scrape_team_rpga()
     bullpen = scrape_bullpen_stats()
     sp_stats = scrape_starting_pitchers()
 
@@ -109,22 +93,54 @@ def calculate_daily_model():
             "ML %","Book O/U","Model O/U","O/U Bet"
         ])
 
-    # Example: Calculate simple model O/U = avg of team RPG + RPGa
-    # (You will later blend SP ERA/FIP and bullpen for weighted model)
-    merged = schedule.copy()
-    merged["Away Score"] = 4
-    merged["Home Score"] = 4
-    merged["ML %"] = "50%"
-    merged["Model O/U"] = (merged["Away Score"] + merged["Home Score"])
-    
-    # Determine betting advice
+    # Merge schedule with SP stats
+    merged = schedule.merge(sp_stats.add_prefix("Away_"), left_on="Away Pitcher", right_on="Away_Pitcher", how="left")\
+                     .merge(sp_stats.add_prefix("Home_"), left_on="Home Pitcher", right_on="Home_Pitcher", how="left")
+
+    # Merge team RPG
+    merged = merged.merge(team_rpg, left_on="Away Team", right_on="Team", how="left").rename(columns={"RPG":"Away_RPG"}).drop(columns=["Team"])
+    merged = merged.merge(team_rpg, left_on="Home Team", right_on="Team", how="left").rename(columns={"RPG":"Home_RPG"}).drop(columns=["Team"])
+
+    # Merge bullpen stats
+    merged = merged.merge(bullpen, left_on="Away Team", right_on="Team", how="left").rename(columns={"Bullpen_ERA":"Away_Bullpen_ERA"}).drop(columns=["Team","Bullpen_WHIP"])
+    merged = merged.merge(bullpen, left_on="Home Team", right_on="Team", how="left").rename(columns={"Bullpen_ERA":"Home_Bullpen_ERA"}).drop(columns=["Team","Bullpen_WHIP"])
+
+    # -----------------------------
+    # Calculate expected runs (no FIP)
+    # -----------------------------
+    merged["Away Exp Runs"] = (
+        merged["Away_RPG"]*0.5 +
+        merged["Home_ERA"]*0.3 +
+        merged["Home_Bullpen_ERA"]*0.2
+    )
+    merged["Home Exp Runs"] = (
+        merged["Home_RPG"]*0.5 +
+        merged["Away_ERA"]*0.3 +
+        merged["Away_Bullpen_ERA"]*0.2
+    )
+
+    merged["Model O/U"] = merged["Away Exp Runs"] + merged["Home Exp Runs"]
+
+    # O/U Bet
     merged["O/U Bet"] = merged.apply(lambda x: (
         "BET THE OVER" if x["Model O/U"] >= (x["Book O/U"] or 0)+2
         else "BET THE UNDER" if x["Model O/U"] <= (x["Book O/U"] or 0)-2
         else "NO BET"
     ), axis=1)
 
-    # Only final 9 columns for Streamlit
+    # Win probability
+    run_diff = merged["Home Exp Runs"] - merged["Away Exp Runs"]
+    merged["Home Win %"] = 1 / (1 + np.power(10, -run_diff/1.5))
+    merged["Away Win %"] = 1 - merged["Home Win %"]
+
+    merged["ML %"] = merged.apply(
+        lambda x: f"{round(max(x['Home Win %'], x['Away Win %'])*100,1)}%", axis=1
+    )
+
+    # Placeholder scores for demo
+    merged["Away Score"] = 0
+    merged["Home Score"] = 0
+
     display_cols = [
         "Game Time","Away Team","Away Score","Home Team","Home Score",
         "ML %","Book O/U","Model O/U","O/U Bet"
