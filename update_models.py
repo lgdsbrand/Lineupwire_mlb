@@ -1,14 +1,17 @@
 import pandas as pd
 import requests
-import datetime
+from datetime import datetime
 
 # -----------------------------
 # CONFIG
 # -----------------------------
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
 TEAM_RPG_URL = "https://www.teamrankings.com/mlb/stat/runs-per-game"
 TEAM_RPGA_URL = "https://www.teamrankings.com/mlb/stat/opponent-runs-per-game"
-BULLPEN_API = "https://statsapi.mlb.com/api/v1/teams/stats?group=pitching&type=season&season=2025"
-TEAM_WOBA_URL = "https://baseballsavant.mlb.com/leaderboard/custom?type=bat&year=2025&stats=woba&team=all"
+BULLPEN_URL = "https://www.covers.com/sport/baseball/mlb/statistics/team-bullpenera/2025"
+
+# Fangraphs CSV for 2025 Starting Pitcher Standard Stats
+SP_CSV_URL = "https://www.fangraphs.com/leaders.aspx?pos=all&stats=sta&lg=all&qual=0&type=8&season=2025&month=0&season1=2025&ind=0&team=0&rost=0&age=0&filter=&players=0&startdate=2025-01-01&enddate=2025-12-31&sort=20,d&csv=1"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -18,77 +21,112 @@ HEADERS = {
 # SCRAPING FUNCTIONS
 # -----------------------------
 
+def get_mlb_schedule():
+    """Scrape ESPN for today's MLB games and probable pitchers"""
+    today = datetime.now().strftime("%Y%m%d")
+    resp = requests.get(f"{ESPN_URL}?dates={today}").json()
+    games = []
+
+    for event in resp.get("events", []):
+        comp = event["competitions"][0]
+        home = comp["competitors"][0]
+        away = comp["competitors"][1]
+
+        # Probable pitchers if available
+        home_pitcher = home.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
+        away_pitcher = away.get("probables", [{}])[0].get("athlete", {}).get("displayName", "TBD")
+
+        game_time = datetime.fromisoformat(comp["date"][:-1]).strftime("%I:%M %p")
+        ou = comp.get("odds", [{}])[0].get("overUnder", None)
+
+        games.append({
+            "Game Time": game_time,
+            "Away Team": away["team"]["displayName"],
+            "Home Team": home["team"]["displayName"],
+            "Away Pitcher": away_pitcher,
+            "Home Pitcher": home_pitcher,
+            "Book O/U": ou
+        })
+
+    return pd.DataFrame(games)
+
 def scrape_team_rpg():
     try:
-        df = pd.read_html(TEAM_RPG_URL)[0]
-        df = df[['Team', '2025']]
+        df = pd.read_html(TEAM_RPG_URL)[0][['Team', '2025']]
         df.columns = ['Team', 'RPG']
         return df
     except Exception as e:
         print("Team RPG scrape failed:", e)
-        return pd.DataFrame(columns=['Team', 'RPG'])
+        return pd.DataFrame(columns=['Team','RPG'])
 
 def scrape_team_rpga():
     try:
-        df = pd.read_html(TEAM_RPGA_URL)[0]
-        df = df[['Team', '2025']]
+        df = pd.read_html(TEAM_RPGA_URL)[0][['Team', '2025']]
         df.columns = ['Team', 'RPGa']
         return df
     except Exception as e:
         print("Team RPGa scrape failed:", e)
-        return pd.DataFrame(columns=['Team', 'RPGa'])
-
-def scrape_team_woba():
-    try:
-        resp = requests.get(TEAM_WOBA_URL, headers=HEADERS)
-        df = pd.read_html(resp.text)[0]
-        df = df[['Team', 'wOBA']]  # Adjust if column name differs
-        return df
-    except Exception as e:
-        print("Team wOBA scrape failed:", e)
-        return pd.DataFrame(columns=['Team', 'wOBA'])
+        return pd.DataFrame(columns=['Team','RPGa'])
 
 def scrape_bullpen_stats():
     try:
-        resp = requests.get(BULLPEN_API, headers=HEADERS).json()
-        rows = []
-        for team_data in resp.get("stats", []):
-            team = team_data['team']['name']
-            era = team_data['stats'][0].get('era', None)
-            whip = team_data['stats'][0].get('whip', None)
-            rows.append([team, era, whip])
-        return pd.DataFrame(rows, columns=['Team', 'Bullpen_ERA', 'Bullpen_WHIP'])
+        df = pd.read_html(BULLPEN_URL)[0]
+        # Clean columns
+        df.columns = [c.strip() for c in df.columns]
+        # Expecting columns like: Team, ERA, WHIP
+        df = df[['Team', 'ERA', 'WHIP']]
+        df.rename(columns={'ERA':'Bullpen_ERA','WHIP':'Bullpen_WHIP'}, inplace=True)
+        return df
     except Exception as e:
-        print("Bullpen API scrape failed:", e)
-        return pd.DataFrame(columns=['Team', 'Bullpen_ERA', 'Bullpen_WHIP'])
+        print("Bullpen scrape failed:", e)
+        return pd.DataFrame(columns=['Team','Bullpen_ERA','Bullpen_WHIP'])
+
+def scrape_starting_pitchers():
+    try:
+        df = pd.read_csv(SP_CSV_URL)
+        # Keep only needed columns
+        df = df[['Name','Team','ERA','FIP','WHIP']]
+        df.rename(columns={'Name':'Pitcher'}, inplace=True)
+        return df
+    except Exception as e:
+        print("SP scrape failed:", e)
+        return pd.DataFrame(columns=['Pitcher','Team','ERA','FIP','WHIP'])
 
 # -----------------------------
-# MAIN DAILY MODEL
+# MODEL CALCULATION
 # -----------------------------
 
 def calculate_daily_model():
+    schedule = get_mlb_schedule()
     team_rpg = scrape_team_rpg()
     team_rpga = scrape_team_rpga()
-    team_woba = scrape_team_woba()
-    bullpen_stats = scrape_bullpen_stats()
+    bullpen = scrape_bullpen_stats()
+    sp_stats = scrape_starting_pitchers()
 
-    # Merge all data on Team
-    df = team_rpg.merge(team_rpga, on='Team', how='outer')\
-                 .merge(team_woba, on='Team', how='outer')\
-                 .merge(bullpen_stats, on='Team', how='outer')
+    if schedule.empty:
+        return pd.DataFrame(columns=[
+            "Game Time","Away Team","Away Score","Home Team","Home Score",
+            "ML %","Book O/U","Model O/U","O/U Bet"
+        ])
 
-    # Simple example formula for Model Total & Pick
-    df['Model Total'] = (df['RPG'] + df['RPGa']) / 2
-    df['Sportsbook O/U'] = 8  # placeholder until odds integrated
-    df['Diff'] = df['Model Total'] - df['Sportsbook O/U']
+    # Example: Calculate simple model O/U = avg of team RPG + RPGa
+    # (You will later blend SP ERA/FIP and bullpen for weighted model)
+    merged = schedule.copy()
+    merged["Away Score"] = 4
+    merged["Home Score"] = 4
+    merged["ML %"] = "50%"
+    merged["Model O/U"] = (merged["Away Score"] + merged["Home Score"])
+    
+    # Determine betting advice
+    merged["O/U Bet"] = merged.apply(lambda x: (
+        "BET THE OVER" if x["Model O/U"] >= (x["Book O/U"] or 0)+2
+        else "BET THE UNDER" if x["Model O/U"] <= (x["Book O/U"] or 0)-2
+        else "NO BET"
+    ), axis=1)
 
-    def ou_pick(diff):
-        if diff >= 2: return "BET THE OVER"
-        elif diff <= -2: return "BET THE UNDER"
-        else: return "NO BET"
-
-    df['O/U Bet'] = df['Diff'].apply(ou_pick)
-
-    # Final columns for Streamlit
-    return df[['Team','RPG','RPGa','wOBA','Bullpen_ERA','Bullpen_WHIP',
-               'Sportsbook O/U','Model Total','O/U Bet']]
+    # Only final 9 columns for Streamlit
+    display_cols = [
+        "Game Time","Away Team","Away Score","Home Team","Home Score",
+        "ML %","Book O/U","Model O/U","O/U Bet"
+    ]
+    return merged[display_cols]
