@@ -2,62 +2,39 @@ import streamlit as st
 import pandas as pd
 from update_models import calculate_daily_model
 
-st.set_page_config(page_title="MLB Daily Model", layout="wide")
+# -----------------------------
+# STREAMLIT CONFIG
+# -----------------------------
+st.set_page_config(
+    page_title="MLB Daily Model",
+    page_icon="⚾",
+    layout="wide"
+)
+
 st.title("⚾ MLB Daily Betting Model (Automatic)")
 
-# ---------------------------
 # Load data
-# ---------------------------
-with st.spinner("Scraping live MLB stats and calculating model..."):
-    df = calculate_daily_model()
+df = calculate_daily_model()
 
-# ---------------------------
-# Define columns to display
-# ---------------------------
+# Replace None/NaN with blank for cleaner UI
+df = df.fillna("")
+
+# Columns to display (match your model output)
 display_cols = [
-    'Team',           # Team name
-    'RPG',            # Runs per Game
-    'RPGa',           # Runs Allowed per Game
-    'rOBA',           # Team rOBA (Baseball Reference)
-    'Bullpen_ERA',    # Bullpen ERA
-    'Bullpen_WHIP',   # Bullpen WHIP
-    'SP_ERA',         # Starting Pitcher ERA
-    'SP_FIP',         # Starting Pitcher FIP
-    'Model_Total',    # Our calculated total runs
-    'O/U Bet'         # Bet recommendation
+    'Team', 'RPG', 'RPGa', 'rOBA',
+    'Bullpen_ERA', 'Bullpen_WHIP',
+    'SP_ERA', 'SP_FIP',
+    'Model_Total', 'O/U Bet'
 ]
 
-df_display = df[display_cols].copy()
+# Only show columns that exist
+display_cols = [c for c in display_cols if c in df.columns]
 
-# ---------------------------
-# Color function for O/U Bet
-# ---------------------------
-def style_ou(val):
-    if val == "BET THE OVER":
-        return "background-color: #d1f7c4;"  # light green
-    elif val == "BET THE UNDER":
-        return "background-color: #fcd7d7;"  # light red
-    elif val == "NO BET":
-        return "background-color: #f1f1f1;"  # light gray
-    return ""
+st.dataframe(
+    df[display_cols],
+    use_container_width=True
+)
 
-# ---------------------------
-# Handle empty dataframe
-# ---------------------------
-if df_display.empty:
-    st.warning("No MLB data available today. Please check sources or try again later.")
-else:
-    # Reset index for clean display
-    df_display = df_display.reset_index(drop=True)
-
-    # Apply styling to O/U Bet column only
-    st.dataframe(
-        df_display.style.applymap(style_ou, subset=['O/U Bet']),
-        use_container_width=True
-    )
-
-# ---------------------------
-# Optional navigation
-# ---------------------------
-if st.button("⬅️ Back to Homepage"):
-    st.switch_page("pages/home.py")
+# Back to homepage button
+if st.button("⬅ Back to Homepage"):
+    st.switch_page("Home.py")
