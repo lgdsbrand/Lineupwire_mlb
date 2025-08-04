@@ -59,10 +59,10 @@ else:
             return "background-color: #f0f0f0; color: black;"  # gray
 
     st.subheader("📊 Daily Score & O/U Predictions")
-    st.dataframe(
-        df_reset.style.applymap(style_ou, subset=["O/U Bet"]),
-        use_container_width=True
-    )
+
+# Create styled DataFrame as HTML because st.dataframe can't handle Styler
+styled_html = df_reset.style.applymap(style_ou, subset=["O/U Bet"]).to_html()
+st.markdown(styled_html, unsafe_allow_html=True)
 
 st.markdown("---")
 st.caption("Data Sources: ESPN, TeamRankings, FanGraphs, Baseball Reference, BallparkPal, Sonny Moore, FanDuel Odds")
