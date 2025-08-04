@@ -1,57 +1,31 @@
 import streamlit as st
 import pandas as pd
-from update_models import calculate_daily_model
 
-# -------------------------------
+# ---------------------------
 # PAGE CONFIG
-# -------------------------------
-st.set_page_config(
-    page_title="MLB Daily Betting Model",
-    page_icon="⚾",
-    layout="wide",
-)
+# ---------------------------
+st.set_page_config(page_title="MLB Daily Model", layout="wide")
 
-# Hide Streamlit default menu, footer, and GitHub icon
-hide_streamlit_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display: none;}
-    </style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.title("⚾ MLB Daily Model")
 
-# -------------------------------
-# HEADER
-# -------------------------------
-st.title("⚾ MLB Daily Betting Model (Automatic)")
+# Back to Homepage button
+if st.button("🏠 Back to Homepage"):
+    st.switch_page("app.py")  # Works if using Streamlit multipage structure
 
-# -------------------------------
-# LOAD DAILY MODEL
-# -------------------------------
-with st.spinner("Calculating model..."):
-    df = calculate_daily_model()
+# ---------------------------
+# LOAD GOOGLE SHEET CSV
+# ---------------------------
+sheet_url = "https://docs.google.com/spreadsheets/d/1Hbl2EHW_ac0mVa1F0lNxuaeDV2hcuo7K_Uyhb-HOU6E/gviz/tq?tqx=out:csv&sheet=DailyModel"
 
-# -------------------------------
-# DISPLAY MODEL TABLE
-# -------------------------------
-display_cols = [
-    "Team", "RPG", "RPGA", "rOBA",
-    "Bullpen_ERA", "Bullpen_WHIP",
-    "SP_ERA", "SP_FIP",
-    "Model_Total", "O/U Bet"
-]
+try:
+    df = pd.read_csv(sheet_url)
+    
+    # Optional: clean None / NaN
+    df.fillna("", inplace=True)
+    
+    # Display table
+    st.dataframe(df, use_container_width=True)
 
-# Handle if any columns are missing (e.g., during first run)
-df_reset = df.reset_index(drop=True)
-for col in display_cols:
-    if col not in df_reset.columns:
-        df_reset[col] = None
-
-st.dataframe(
-    df_reset[display_cols],
-    use_container_width=True
-)
-
-st.success("✅ Model updated automatically.")
+except Exception as e:
+    st.error("⚠️ Could not load Daily Model from Google Sheets. Check the sheet URL and sharing settings.")
+    st.text(str(e))
