@@ -1,0 +1,33 @@
+name: Update Daily MLB Model
+
+on:
+  workflow_dispatch:    # Allows manual run from GitHub
+  schedule:
+    # Runs 3 times daily: 12 AM, 7 AM, and 12 PM Eastern (adjusted for UTC)
+    - cron: "0 5,12,17 * * *"
+
+jobs:
+  update-daily-model:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Daily Model
+        run: python update_models.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --local user.name "github-actions"
+          git config --local user.email "actions@github.com"
+          git add daily_model.csv
+          git commit -m "Automated daily model update"
+          git push
